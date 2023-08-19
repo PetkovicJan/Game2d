@@ -7,6 +7,60 @@
 #include <iostream>
 #include <memory>
 #include <functional>
+#include <thread>
+#include <filesystem>
+#include <fstream>
+
+class Logger
+{
+public:
+
+private:
+  Logger(std::filesystem::path const& output);
+  ~Logger();
+
+  friend Logger& file_logger();
+
+template<typename T>
+friend Logger& operator<<(Logger& logger, T&& src);
+
+friend Logger& operator<<(Logger& logger, decltype(std::endl<char, std::char_traits<char>>));
+
+  std::ofstream file_;
+};
+
+Logger::Logger(std::filesystem::path const& output)
+{
+  file_.open(output);
+}
+
+Logger::~Logger()
+{
+  file_.close();
+}
+
+template<typename T>
+Logger& operator<<(Logger& logger, T&& src)
+{
+  logger.file_ << src;
+  return logger;
+}
+
+Logger& operator<<(Logger& logger, decltype(std::endl<char, std::char_traits<char>>))
+{
+  logger.file_ << std::endl;
+  return logger;
+}
+
+Logger& file_logger()
+{
+  std::filesystem::path file_path = "log.txt";
+  static Logger logger(file_path);
+
+  return logger;
+}
+
+Logger& logger = file_logger();
 
 struct Configuration
 {
@@ -30,6 +84,8 @@ private:
 
 };
 
+// This function is invoked internally by calling DispatchMessage(). Note that
+// it is executed in the same thread.
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   switch (uMsg)
