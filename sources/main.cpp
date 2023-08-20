@@ -90,8 +90,9 @@ class Window
 public:
   Window(Configuration const& config);
 
+  void render();
 private:
-
+  HWND hWnd_ = NULL;
 };
 
 // This function is invoked internally by calling DispatchMessage(). Note that
@@ -109,6 +110,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         HDC hdc = BeginPaint(hWnd, &ps);
 
         FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
+
 
         EndPaint(hWnd, &ps);
     }
@@ -133,10 +135,18 @@ Window::Window(Configuration const& config)
 
   if (hWindow == NULL)
   {
-    // Handle no window.
+    throw std::runtime_error("Creating window failed.");
   }
 
   ShowWindow(hWindow, config.cmd_show);
+
+  hWnd_ = hWindow;
+}
+
+void Window::render()
+{
+  InvalidateRect(hWnd_, NULL, TRUE);
+  UpdateWindow(hWnd_);
 }
 
 class Game
@@ -150,6 +160,8 @@ public:
 
 private:
   void addObject(float x, float y);
+
+  void triggerRender();
 
   std::unique_ptr<Window> win_;
 
@@ -168,16 +180,23 @@ void Game::init(Configuration const& config)
 
 void Game::exec()
 {
-  MSG msg = { };
   auto prev_end_time = std::chrono::steady_clock::now();
   auto prev_sleep_time = std::chrono::duration<float, std::milli>(0);
-  while (GetMessage(&msg, NULL, 0, 0) > 0)
+  while (true)
   {
     const auto begin_time = std::chrono::steady_clock::now();
     const auto prev_overshoot_time = begin_time - prev_end_time - prev_sleep_time;
 
-    TranslateMessage(&msg);
-    DispatchMessage(&msg);
+    MSG msg;
+    if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
+    {
+      if (msg.message == WM_QUIT) break;
+
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+
+    triggerRender();
 
     const auto end_time = std::chrono::steady_clock::now();
     const auto body_duration = end_time - begin_time;
@@ -192,6 +211,11 @@ void Game::addObject(float x, float y)
 {
   objects_.emplace_back(object_unique_id_, x, y);
   ++object_unique_id_;
+}
+
+void Game::triggerRender()
+{
+  win_->render();
 }
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
