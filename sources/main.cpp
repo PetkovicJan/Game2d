@@ -83,6 +83,7 @@ struct Object
 
   int id = 0;
   float x = 0.f, y = 0.f;
+  float vx = 0.f, vy = 0.f;
 };
 
 class ObjectCollection
@@ -90,6 +91,7 @@ class ObjectCollection
 public:
   void addObject(float x, float y);
 
+  std::vector<Object>& getObjects();
   std::vector<Object> const& getObjects() const;
 
 private:
@@ -102,24 +104,16 @@ void ObjectCollection::addObject(float x, float y)
   objects_.emplace_back(object_unique_id_, x, y);
   ++object_unique_id_;
 }
-std::vector<Object> const& ObjectCollection::getObjects() const
+
+std::vector<Object>& ObjectCollection::getObjects() 
 {
   return objects_;
 }
 
-class Window
+std::vector<Object> const& ObjectCollection::getObjects() const
 {
-public:
-  Window(Configuration const& config, ObjectCollection const& obj_collection);
-
-  void render();
-private:
-  static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-  LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-
-  HWND hWnd_ = NULL;
-  ObjectCollection const& obj_collection_;
-};
+  return objects_;
+}
 
 class SolidBrushRaii
 {
@@ -146,10 +140,110 @@ SolidBrushRaii::~SolidBrushRaii()
   DeleteObject(new_brush_);
 }
 
+class Command
+{
+public:
+  virtual ~Command() {};
+  virtual void execute(Object& obj) = 0;
+};
+
+class SetVelocityCommand : public Command
+{
+public:
+  SetVelocityCommand(float vx, float vy) : vx_(vx), vy_(vy) {}
+
+  void execute(Object& obj) override
+  {
+    obj.vx = vx_;
+    obj.vy = vy_;
+  }
+
+private:
+  float vx_{ 0.f }, vy_{ 0.f };
+};
+
+class AddVelocityCommand : public Command
+{
+public:
+  AddVelocityCommand(float vx, float vy) : vx_(vx), vy_(vy) {}
+
+  void execute(Object& obj) override
+  {
+    obj.vx += vx_;
+    obj.vy += vy_;
+  }
+
+private:
+  float vx_{ 0.f }, vy_{ 0.f };
+};
+
+class Window
+{
+public:
+  Window(Configuration const& config, ObjectCollection& obj_collection);
+
+  void render();
+private:
+  static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+  LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  HWND hWnd_ = NULL;
+  ObjectCollection& obj_collection_;
+
+  std::unique_ptr<Command> move_left_cmd_;
+  std::unique_ptr<Command> move_right_cmd_;
+  std::unique_ptr<Command> move_up_cmd_;
+  std::unique_ptr<Command> move_down_cmd_;
+  std::unique_ptr<Command> stop_cmd_;
+};
+
+Window::Window(Configuration const& config, ObjectCollection& obj_collection) : obj_collection_(obj_collection)
+{
+  const wchar_t CLASS_NAME[] = L"Game Window Class";
+  WNDCLASS window_class = {};
+  window_class.lpfnWndProc = WindowProc;
+  window_class.hInstance = config.instance;
+  window_class.lpszClassName = CLASS_NAME;
+
+  RegisterClass(&window_class);
+
+  HWND hWindow = CreateWindowEx(0, CLASS_NAME, L"Game", WS_OVERLAPPEDWINDOW, 
+    CW_USEDEFAULT, CW_USEDEFAULT, config.window_width, config.window_height,
+    NULL, NULL, config.instance, NULL);
+
+  if (hWindow == NULL)
+  {
+    throw std::runtime_error("Creating window failed.");
+  }
+
+  // Set a value at the specified offset (user data) in the extra window memory.
+  // Used to enable wrapping the member function into a static method.
+  SetWindowLongPtr(hWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+
+  ShowWindow(hWindow, config.cmd_show);
+
+  hWnd_ = hWindow;
+
+  move_left_cmd_ = std::make_unique<SetVelocityCommand>(-1.f, 0.f);
+  move_right_cmd_ = std::make_unique<SetVelocityCommand>(1.f, 0.f);
+  move_up_cmd_ = std::make_unique<SetVelocityCommand>(0.f, -1.f);
+  move_down_cmd_ = std::make_unique<SetVelocityCommand>(0.f, 1.f);
+  stop_cmd_ = std::make_unique<SetVelocityCommand>(0.f, 0.f);
+}
+
+void Window::render()
+{
+  InvalidateRect(hWnd_, NULL, TRUE);
+  UpdateWindow(hWnd_);
+}
+
 // This function is invoked internally by calling DispatchMessage(). Note that
 // it is executed in the same thread.
 LRESULT CALLBACK Window::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+  // Standard pattern for wrapping the member function, so that it can be
+  // used as a callback (Windows expects a plain function, but member functions
+  // have an additional implicit this argument).
   Window* this_ptr = nullptr;
   if (uMsg == WM_NCCREATE)
   {
@@ -169,45 +263,14 @@ LRESULT CALLBACK Window::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-Window::Window(Configuration const& config, ObjectCollection const& obj_collection) : obj_collection_(obj_collection)
-{
-  const wchar_t CLASS_NAME[] = L"Game Window Class";
-  WNDCLASS window_class = {};
-  window_class.lpfnWndProc = WindowProc;
-  window_class.hInstance = config.instance;
-  window_class.lpszClassName = CLASS_NAME;
-
-  RegisterClass(&window_class);
-
-  HWND hWindow = CreateWindowEx(0, CLASS_NAME, L"Game", WS_OVERLAPPEDWINDOW, 
-    CW_USEDEFAULT, CW_USEDEFAULT, config.window_width, config.window_height,
-    NULL, NULL, config.instance, NULL);
-
-  if (hWindow == NULL)
-  {
-    throw std::runtime_error("Creating window failed.");
-  }
-
-  // Standard pattern for wrapping the member function, so that it can be
-  // used as a callback (Windows expects a plain function, but member functions
-  // have an additional implicit this argument).
-
-  // Set a value at the specified offset (user data) in the extra window memory.
-  SetWindowLongPtr(hWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-
-  ShowWindow(hWindow, config.cmd_show);
-
-  hWnd_ = hWindow;
-}
-
-void Window::render()
-{
-  InvalidateRect(hWnd_, NULL, TRUE);
-  UpdateWindow(hWnd_);
-}
-
 LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+  Object* main_actor = nullptr;
+  if (obj_collection_.getObjects().size() > 0)
+    main_actor = &(obj_collection_.getObjects().at(0));
+
+  Command* cmd = nullptr;
+
   switch (uMsg)
   {
   case WM_DESTROY:
@@ -232,7 +295,32 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
       EndPaint(hWnd, &ps);
       break;
     }
+  case WM_KEYDOWN:
+  {
+    if (wParam == VK_LEFT)
+      cmd = move_left_cmd_.get();
+    else if (wParam == VK_RIGHT)
+      cmd = move_right_cmd_.get();
+    else if (wParam == VK_UP)
+      cmd = move_up_cmd_.get();
+    else if (wParam == VK_DOWN)
+      cmd = move_down_cmd_.get();
+
+    break;
+  }
+  case WM_KEYUP:
+  {
+    cmd = stop_cmd_.get();
+
+    break;
+  }
+
     return 0;
+  }
+
+  if (cmd && main_actor)
+  {
+    cmd->execute(*main_actor);
   }
 
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
@@ -280,6 +368,12 @@ void Game::exec()
 
       TranslateMessage(&msg);
       DispatchMessage(&msg);
+    }
+
+    for (auto& o : object_collection_.getObjects())
+    {
+      o.x += o.vx;
+      o.y += o.vy;
     }
 
     triggerRender();
