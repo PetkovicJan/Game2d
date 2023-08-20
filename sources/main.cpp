@@ -220,17 +220,24 @@ void Game::triggerRender()
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
-  auto config = read_config();
+  try
+  {
+    auto config = read_config();
 
-  // Additional Windows specific parameters.
-  config.instance = hInstance;
-  config.cmd_show = nCmdShow;
+    // Additional Windows specific parameters.
+    config.instance = hInstance;
+    config.cmd_show = nCmdShow;
 
-  auto game = std::make_unique<Game>();
+    auto game = std::make_unique<Game>();
 
-  game->init(config);
+    game->init(config);
 
-  game->exec();
+    game->exec();
+  }
+  catch (std::exception const& e)
+  {
+    logger << e.what() << std::endl;
+  }
 
   return 0;
 }
