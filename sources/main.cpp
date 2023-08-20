@@ -92,30 +92,57 @@ public:
 
   void render();
 private:
+  static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+  LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
   HWND hWnd_ = NULL;
 };
 
+class SolidBrushRaii
+{
+public:
+  SolidBrushRaii(HDC dc, int r, int g, int b);
+
+  ~SolidBrushRaii();
+
+private:
+  HDC dc_ = NULL;
+  HBRUSH new_brush_ = NULL;
+  HBRUSH old_brush_ = NULL;
+};
+
+SolidBrushRaii::SolidBrushRaii(HDC dc, int r, int g, int b) : dc_(dc)
+{
+  new_brush_ = CreateSolidBrush(RGB(r, g, b));
+  old_brush_ = (HBRUSH)SelectObject(dc, new_brush_);
+}
+
+SolidBrushRaii::~SolidBrushRaii()
+{
+  SelectObject(dc_, old_brush_);
+  DeleteObject(new_brush_);
+}
+
 // This function is invoked internally by calling DispatchMessage(). Note that
 // it is executed in the same thread.
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK Window::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-  switch (uMsg)
+  Window* this_ptr = nullptr;
+  if (uMsg == WM_NCCREATE)
   {
-  case WM_DESTROY:
-    PostQuitMessage(0);
-    return 0;
-  case WM_PAINT:
-    {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
-
-        FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
-
-
-        EndPaint(hWnd, &ps);
-    }
-    return 0;
+      this_ptr = reinterpret_cast<Window*>(reinterpret_cast<CREATESTRUCT*>(lParam)->lpCreateParams);
+      SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this_ptr));
   }
+  else
+  {
+      this_ptr = reinterpret_cast<Window*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+  }
+
+  if (this_ptr)
+  {
+      return this_ptr->WindowProcImpl(hWnd, uMsg, wParam, lParam);
+  }
+
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
@@ -138,6 +165,13 @@ Window::Window(Configuration const& config)
     throw std::runtime_error("Creating window failed.");
   }
 
+  // Standard pattern for wrapping the member function, so that it can be
+  // used as a callback (Windows expects a plain function, but member functions
+  // have an additional implicit this argument).
+
+  // Set a value at the specified offset (user data) in the extra window memory.
+  SetWindowLongPtr(hWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+
   ShowWindow(hWindow, config.cmd_show);
 
   hWnd_ = hWindow;
@@ -147,6 +181,39 @@ void Window::render()
 {
   InvalidateRect(hWnd_, NULL, TRUE);
   UpdateWindow(hWnd_);
+}
+
+LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+  switch (uMsg)
+  {
+  case WM_DESTROY:
+    PostQuitMessage(0);
+    return 0;
+  case WM_PAINT:
+    {
+      PAINTSTRUCT ps;
+      HDC hdc = BeginPaint(hWnd, &ps);
+
+      FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
+
+      {
+        SolidBrushRaii red_brush(hdc, 255, 0, 0);
+        Rectangle(hdc, 300, 300, 350, 350);
+      }
+
+      {
+        SolidBrushRaii blue_brush(hdc, 0, 0, 255);
+        Rectangle(hdc, 600, 600, 650, 650);
+      }
+
+      EndPaint(hWnd, &ps);
+      break;
+    }
+    return 0;
+  }
+
+  return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
 class Game
