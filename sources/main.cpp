@@ -85,10 +85,32 @@ struct Object
   float x = 0.f, y = 0.f;
 };
 
+class ObjectCollection
+{
+public:
+  void addObject(float x, float y);
+
+  std::vector<Object> const& getObjects() const;
+
+private:
+  int object_unique_id_ = 0;
+  std::vector<Object> objects_;
+};
+
+void ObjectCollection::addObject(float x, float y)
+{
+  objects_.emplace_back(object_unique_id_, x, y);
+  ++object_unique_id_;
+}
+std::vector<Object> const& ObjectCollection::getObjects() const
+{
+  return objects_;
+}
+
 class Window
 {
 public:
-  Window(Configuration const& config);
+  Window(Configuration const& config, ObjectCollection const& obj_collection);
 
   void render();
 private:
@@ -96,6 +118,7 @@ private:
   LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
   HWND hWnd_ = NULL;
+  ObjectCollection const& obj_collection_;
 };
 
 class SolidBrushRaii
@@ -146,7 +169,7 @@ LRESULT CALLBACK Window::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-Window::Window(Configuration const& config)
+Window::Window(Configuration const& config, ObjectCollection const& obj_collection) : obj_collection_(obj_collection)
 {
   const wchar_t CLASS_NAME[] = L"Game Window Class";
   WNDCLASS window_class = {};
@@ -195,16 +218,15 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
       PAINTSTRUCT ps;
       HDC hdc = BeginPaint(hWnd, &ps);
 
+      // Fill background.
       FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
 
+      for(const auto& obj : obj_collection_.getObjects())
       {
+        const auto w = 20;
+        const auto h = 20;
         SolidBrushRaii red_brush(hdc, 255, 0, 0);
-        Rectangle(hdc, 300, 300, 350, 350);
-      }
-
-      {
-        SolidBrushRaii blue_brush(hdc, 0, 0, 255);
-        Rectangle(hdc, 600, 600, 650, 650);
+        Rectangle(hdc, obj.x, obj.y, obj.x + w, obj.y + h);
       }
 
       EndPaint(hWnd, &ps);
@@ -226,23 +248,20 @@ public:
   void exec();
 
 private:
-  void addObject(float x, float y);
-
   void triggerRender();
 
   std::unique_ptr<Window> win_;
 
   std::chrono::duration<float, std::milli> frame_time_;
 
-  int object_unique_id_ = 0;
-  std::vector<Object> objects_;
+  ObjectCollection object_collection_;
 };
 
 void Game::init(Configuration const& config)
 {
-  win_ = std::make_unique<Window>(config);
+  win_ = std::make_unique<Window>(config, object_collection_);
   frame_time_ = std::chrono::milliseconds(1000) / config.fps;
-  addObject(config.window_width / 2.f, config.window_height / 2.f);
+  object_collection_.addObject(config.window_width / 2.f, config.window_height / 2.f);
 }
 
 void Game::exec()
@@ -272,12 +291,6 @@ void Game::exec()
 
     prev_end_time = end_time;
   }
-}
-
-void Game::addObject(float x, float y)
-{
-  objects_.emplace_back(object_unique_id_, x, y);
-  ++object_unique_id_;
 }
 
 void Game::triggerRender()
