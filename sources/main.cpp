@@ -147,19 +147,32 @@ public:
   virtual void execute(Object& obj) = 0;
 };
 
-class SetVelocityCommand : public Command
+class SetVelocityX : public Command
 {
 public:
-  SetVelocityCommand(float vx, float vy) : vx_(vx), vy_(vy) {}
+  SetVelocityX(float vx) : vx_(vx) {}
 
   void execute(Object& obj) override
   {
     obj.vx = vx_;
+  }
+
+private:
+  float vx_{ 0.f };
+};
+
+class SetVelocityY : public Command
+{
+public:
+  SetVelocityY(float vy) : vy_(vy) {}
+
+  void execute(Object& obj) override
+  {
     obj.vy = vy_;
   }
 
 private:
-  float vx_{ 0.f }, vy_{ 0.f };
+  float vy_{ 0.f };
 };
 
 class AddVelocityCommand : public Command
@@ -184,17 +197,19 @@ public:
 
   void render();
 private:
+  enum class KeyState { Up, Down };
+
   static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+  template<typename T, typename... Args>
+  void registerKeyCommand(int key, KeyState state, Args... args);
 
   HWND hWnd_ = NULL;
   ObjectCollection& obj_collection_;
 
-  std::unique_ptr<Command> move_left_cmd_;
-  std::unique_ptr<Command> move_right_cmd_;
-  std::unique_ptr<Command> move_up_cmd_;
-  std::unique_ptr<Command> move_down_cmd_;
-  std::unique_ptr<Command> stop_cmd_;
+  std::unordered_map<int, std::unique_ptr<Command>> up_commands_;
+  std::unordered_map<int, std::unique_ptr<Command>> down_commands_;
 };
 
 Window::Window(Configuration const& config, ObjectCollection& obj_collection) : obj_collection_(obj_collection)
@@ -224,11 +239,14 @@ Window::Window(Configuration const& config, ObjectCollection& obj_collection) : 
 
   hWnd_ = hWindow;
 
-  move_left_cmd_ = std::make_unique<SetVelocityCommand>(-1.f, 0.f);
-  move_right_cmd_ = std::make_unique<SetVelocityCommand>(1.f, 0.f);
-  move_up_cmd_ = std::make_unique<SetVelocityCommand>(0.f, -1.f);
-  move_down_cmd_ = std::make_unique<SetVelocityCommand>(0.f, 1.f);
-  stop_cmd_ = std::make_unique<SetVelocityCommand>(0.f, 0.f);
+  registerKeyCommand<SetVelocityX>(VK_LEFT, KeyState::Down, -1.f);
+  registerKeyCommand<SetVelocityX>(VK_RIGHT, KeyState::Down, 1.f);
+  registerKeyCommand<SetVelocityY>(VK_UP, KeyState::Down, -1.f);
+  registerKeyCommand<SetVelocityY>(VK_DOWN, KeyState::Down, 1.f);
+  registerKeyCommand<SetVelocityX>(VK_LEFT, KeyState::Up, 0.f);
+  registerKeyCommand<SetVelocityX>(VK_RIGHT, KeyState::Up, 0.f);
+  registerKeyCommand<SetVelocityY>(VK_UP, KeyState::Up, 0.f);
+  registerKeyCommand<SetVelocityY>(VK_DOWN, KeyState::Up, 0.f);
 }
 
 void Window::render()
@@ -297,20 +315,15 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     }
   case WM_KEYDOWN:
   {
-    if (wParam == VK_LEFT)
-      cmd = move_left_cmd_.get();
-    else if (wParam == VK_RIGHT)
-      cmd = move_right_cmd_.get();
-    else if (wParam == VK_UP)
-      cmd = move_up_cmd_.get();
-    else if (wParam == VK_DOWN)
-      cmd = move_down_cmd_.get();
+    if (const auto it = down_commands_.find(wParam); it != down_commands_.end())
+      cmd = it->second.get();
 
     break;
   }
   case WM_KEYUP:
   {
-    cmd = stop_cmd_.get();
+    if (const auto it = up_commands_.find(wParam); it != up_commands_.end())
+      cmd = it->second.get();
 
     break;
   }
@@ -324,6 +337,20 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
   }
 
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+template<typename T, typename... Args>
+void Window::registerKeyCommand(int key, KeyState state, Args... args)
+{
+  auto cmd = std::make_unique<T>(args...);
+  if (state == KeyState::Up)
+  {
+    up_commands_.emplace(key, std::move(cmd));
+  }
+  else // KeyState::Down
+  {
+    down_commands_.emplace(key, std::move(cmd));
+  }
 }
 
 class Game
