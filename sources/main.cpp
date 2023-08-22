@@ -70,6 +70,9 @@ struct Configuration
   int cmd_show;
 
   float fps = 16;
+
+  float main_actor_v = 2.f;
+  float bullet_v = 5.f;
 };
 
 Configuration read_config()
@@ -97,6 +100,24 @@ struct Object
   std::unique_ptr<InputHandler> input_handler_;
 };
 
+class DynamicsHandler
+{
+public:
+  virtual ~DynamicsHandler() {}
+
+  virtual void handleDynamics(Object& obj) = 0;
+};
+
+class StraightMotion : public DynamicsHandler
+{
+public:
+  virtual void handleDynamics(Object& obj)
+  {
+    obj.x += obj.vx;
+    obj.y += obj.vy;
+  }
+};
+
 class InputHandler
 {
 public:
@@ -108,28 +129,41 @@ public:
 class MainActorInput : public InputHandler
 {
 public:
+  explicit MainActorInput(float v, float v_bullet, std::vector<Object>& objects);
+
   void handleInput(Object& obj, KeyState state, int vkey);
+
+public:
+  void createBullet(Object& obj);
+
+  float v_ = 0.f;
+  float v_bullet_ = 0.f;
+  std::vector<Object>& objects_;
 };
+
+MainActorInput::MainActorInput(float v, float v_bullet, std::vector<Object>& objects) : 
+  v_(v), v_bullet_(v_bullet), objects_(objects) {}
 
 void MainActorInput::handleInput(Object& obj, KeyState state, int vkey)
 {
+  // Handle movement.
   if (state == KeyState::Down)
   {
     if (vkey == VK_LEFT)
     {
-      obj.vx = -1.f;
+      obj.vx = -v_;
     }
     else if (vkey == VK_RIGHT)
     {
-      obj.vx = 1.f;
+      obj.vx = v_;
     }
     else if (vkey == VK_UP)
     {
-      obj.vy = -1.f;
+      obj.vy = -v_;
     }
     else if (vkey == VK_DOWN)
     {
-      obj.vy = 1.f;
+      obj.vy = v_;
     }
   }
   else // KeyState::Up
@@ -151,25 +185,25 @@ void MainActorInput::handleInput(Object& obj, KeyState state, int vkey)
       obj.vy = 0.f;
     }
   }
+
+  if (vkey == VK_SPACE && state == KeyState::Down)
+  {
+    createBullet(obj);
+  }
 }
 
-class DynamicsHandler
+void MainActorInput::createBullet(Object& obj)
 {
-public:
-  virtual ~DynamicsHandler() {}
+  const float abs_vx = abs(obj.vx);
+  const float unit_x = abs_vx > 1e-6f ? obj.vx / abs_vx : 0.f;
+  const float abs_vy = abs(obj.vy);
+  const float unit_y = abs_vy > 1e-6f ? obj.vy / abs_vy : 0.f;
+  Object bullet(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_);
 
-  virtual void handleDynamics(Object& obj) = 0;
-};
+  bullet.dynamics_handler_ = std::make_unique<StraightMotion>();
 
-class StraightMotion : public DynamicsHandler
-{
-public:
-  virtual void handleDynamics(Object& obj)
-  {
-    obj.x += obj.vx;
-    obj.y += obj.vy;
-  }
-};
+  objects_.emplace_back(std::move(bullet));
+}
 
 void Object::handleInput(KeyState state, int vkey)
 {
@@ -355,7 +389,7 @@ void Game::init(Configuration const& config)
 
   Object main_actor(config.window_width / 2.f, config.window_height / 2.f);
   main_actor.dynamics_handler_ = std::make_unique<StraightMotion>();
-  main_actor.input_handler_ = std::make_unique<MainActorInput>();
+  main_actor.input_handler_ = std::make_unique<MainActorInput>(config.main_actor_v, config.bullet_v, objects_);
   objects_.emplace_back(std::move(main_actor));
 }
 
