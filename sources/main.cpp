@@ -3,6 +3,8 @@
 #endif
 
 #include <windows.h>
+#include <objidl.h>
+#include <gdiplus.h>
 
 #include <iostream>
 #include <memory>
@@ -440,6 +442,11 @@ void Game::triggerRender()
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
+  // Initialize GDI+.
+  Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+  ULONG_PTR gdiplusToken;
+  GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
   try
   {
     auto config = read_config();
@@ -458,6 +465,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
   {
     logger << e.what() << std::endl;
   }
+
+  Gdiplus::GdiplusShutdown(gdiplusToken);
 
   return 0;
 }

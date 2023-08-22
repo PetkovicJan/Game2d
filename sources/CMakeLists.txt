@@ -8,5 +8,5 @@ set(CPP_FILES main.cpp)
 add_executable(${PROJECT_NAME} WIN32 ${CPP_FILES})
 
 # Link libraries.
-set(LIBRARIES )
+set(LIBRARIES gdiplus.lib)
 target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBRARIES})
