@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#include <uxtheme.h>
 
 #include <iostream>
 #include <memory>
@@ -294,6 +295,8 @@ class Window
 public:
   Window(Configuration const& config, std::vector<Object>& obj_collection);
 
+  ~Window();
+
   void render();
 private:
   static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -305,6 +308,8 @@ private:
 
 Window::Window(Configuration const& config, std::vector<Object>& obj_collection) : obj_collection_(obj_collection)
 {
+  BufferedPaintInit();
+
   const wchar_t CLASS_NAME[] = L"Game Window Class";
   WNDCLASS window_class = {};
   window_class.lpfnWndProc = WindowProc;
@@ -329,6 +334,11 @@ Window::Window(Configuration const& config, std::vector<Object>& obj_collection)
   ShowWindow(hWindow, config.cmd_show);
 
   hWnd_ = hWindow;
+}
+
+Window::~Window()
+{
+  BufferedPaintUnInit();
 }
 
 void Window::render()
@@ -375,13 +385,19 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
       PAINTSTRUCT ps;
       HDC hdc = BeginPaint(hWnd, &ps);
 
-      // Fill background.
-      FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
+      RECT rect;
+      GetClientRect(hWnd, &rect);
+      HDC buff_hdc;
+      auto h_buff = BeginBufferedPaint(hdc, &rect, BPBF_COMPATIBLEBITMAP, NULL, &buff_hdc);
 
-      Gdiplus::Graphics graphics(hdc);
+      // Fill background.
+      FillRect(buff_hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
+
+      Gdiplus::Graphics graphics(buff_hdc);
       for (auto it = obj_collection_.rbegin(); it != obj_collection_.rend(); ++it )
         it->handleGraphics(graphics);
 
+      EndBufferedPaint(h_buff, TRUE);
       EndPaint(hWnd, &ps);
       break;
     }
