@@ -77,42 +77,110 @@ Configuration read_config()
   return Configuration();
 }
 
+class DynamicsHandler;
+class InputHandler;
+
+enum class KeyState { Up, Down };
+
 struct Object
 {
-  Object(int id, float x, float y) : id(id), x(x), y(y) {}
+  Object(float x, float y, float vx = 0.f, float vy = 0.f) : x(x), y(y), vx(vx), vy(vy) {}
 
-  int id = 0;
+  void handleInput(KeyState state, int vkey);
+  void handleDynamics();
+
   float x = 0.f, y = 0.f;
   float vx = 0.f, vy = 0.f;
+  bool remove = false;
+
+  std::unique_ptr<DynamicsHandler> dynamics_handler_;
+  std::unique_ptr<InputHandler> input_handler_;
 };
 
-class ObjectCollection
+class InputHandler
 {
 public:
-  void addObject(float x, float y);
+  virtual ~InputHandler() {}
 
-  std::vector<Object>& getObjects();
-  std::vector<Object> const& getObjects() const;
-
-private:
-  int object_unique_id_ = 0;
-  std::vector<Object> objects_;
+  virtual void handleInput(Object& obj, KeyState state, int vkey) = 0;
 };
 
-void ObjectCollection::addObject(float x, float y)
+class MainActorInput : public InputHandler
 {
-  objects_.emplace_back(object_unique_id_, x, y);
-  ++object_unique_id_;
+public:
+  void handleInput(Object& obj, KeyState state, int vkey);
+};
+
+void MainActorInput::handleInput(Object& obj, KeyState state, int vkey)
+{
+  if (state == KeyState::Down)
+  {
+    if (vkey == VK_LEFT)
+    {
+      obj.vx = -1.f;
+    }
+    else if (vkey == VK_RIGHT)
+    {
+      obj.vx = 1.f;
+    }
+    else if (vkey == VK_UP)
+    {
+      obj.vy = -1.f;
+    }
+    else if (vkey == VK_DOWN)
+    {
+      obj.vy = 1.f;
+    }
+  }
+  else // KeyState::Up
+  {
+    if (vkey == VK_LEFT && obj.vx < 0.f)
+    {
+      obj.vx = 0.f;
+    }
+    else if (vkey == VK_RIGHT && obj.vx > 0.f)
+    {
+      obj.vx = 0.f;
+    }
+    else if (vkey == VK_UP && obj.vy < 0.f)
+    {
+      obj.vy = 0.f;
+    }
+    else if (vkey == VK_DOWN && obj.vy > 0.f)
+    {
+      obj.vy = 0.f;
+    }
+  }
 }
 
-std::vector<Object>& ObjectCollection::getObjects() 
+class DynamicsHandler
 {
-  return objects_;
+public:
+  virtual ~DynamicsHandler() {}
+
+  virtual void handleDynamics(Object& obj) = 0;
+};
+
+class StraightMotion : public DynamicsHandler
+{
+public:
+  virtual void handleDynamics(Object& obj)
+  {
+    obj.x += obj.vx;
+    obj.y += obj.vy;
+  }
+};
+
+void Object::handleInput(KeyState state, int vkey)
+{
+  if(input_handler_)
+    input_handler_->handleInput(*this, state, vkey);
 }
 
-std::vector<Object> const& ObjectCollection::getObjects() const
+void Object::handleDynamics()
 {
-  return objects_;
+  if (dynamics_handler_)
+    dynamics_handler_->handleDynamics(*this);
 }
 
 class SolidBrushRaii
@@ -140,79 +208,21 @@ SolidBrushRaii::~SolidBrushRaii()
   DeleteObject(new_brush_);
 }
 
-class Command
-{
-public:
-  virtual ~Command() {};
-  virtual void execute(Object& obj) = 0;
-};
-
-class SetVelocityX : public Command
-{
-public:
-  SetVelocityX(float vx) : vx_(vx) {}
-
-  void execute(Object& obj) override
-  {
-    obj.vx = vx_;
-  }
-
-private:
-  float vx_{ 0.f };
-};
-
-class SetVelocityY : public Command
-{
-public:
-  SetVelocityY(float vy) : vy_(vy) {}
-
-  void execute(Object& obj) override
-  {
-    obj.vy = vy_;
-  }
-
-private:
-  float vy_{ 0.f };
-};
-
-class AddVelocityCommand : public Command
-{
-public:
-  AddVelocityCommand(float vx, float vy) : vx_(vx), vy_(vy) {}
-
-  void execute(Object& obj) override
-  {
-    obj.vx += vx_;
-    obj.vy += vy_;
-  }
-
-private:
-  float vx_{ 0.f }, vy_{ 0.f };
-};
-
 class Window
 {
 public:
-  Window(Configuration const& config, ObjectCollection& obj_collection);
+  Window(Configuration const& config, std::vector<Object>& obj_collection);
 
   void render();
 private:
-  enum class KeyState { Up, Down };
-
   static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
   LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
-  template<typename T, typename... Args>
-  void registerKeyCommand(int key, KeyState state, Args... args);
-
   HWND hWnd_ = NULL;
-  ObjectCollection& obj_collection_;
-
-  std::unordered_map<int, std::unique_ptr<Command>> up_commands_;
-  std::unordered_map<int, std::unique_ptr<Command>> down_commands_;
+  std::vector<Object>& obj_collection_;
 };
 
-Window::Window(Configuration const& config, ObjectCollection& obj_collection) : obj_collection_(obj_collection)
+Window::Window(Configuration const& config, std::vector<Object>& obj_collection) : obj_collection_(obj_collection)
 {
   const wchar_t CLASS_NAME[] = L"Game Window Class";
   WNDCLASS window_class = {};
@@ -238,15 +248,6 @@ Window::Window(Configuration const& config, ObjectCollection& obj_collection) : 
   ShowWindow(hWindow, config.cmd_show);
 
   hWnd_ = hWindow;
-
-  registerKeyCommand<SetVelocityX>(VK_LEFT, KeyState::Down, -1.f);
-  registerKeyCommand<SetVelocityX>(VK_RIGHT, KeyState::Down, 1.f);
-  registerKeyCommand<SetVelocityY>(VK_UP, KeyState::Down, -1.f);
-  registerKeyCommand<SetVelocityY>(VK_DOWN, KeyState::Down, 1.f);
-  registerKeyCommand<SetVelocityX>(VK_LEFT, KeyState::Up, 0.f);
-  registerKeyCommand<SetVelocityX>(VK_RIGHT, KeyState::Up, 0.f);
-  registerKeyCommand<SetVelocityY>(VK_UP, KeyState::Up, 0.f);
-  registerKeyCommand<SetVelocityY>(VK_DOWN, KeyState::Up, 0.f);
 }
 
 void Window::render()
@@ -283,12 +284,6 @@ LRESULT CALLBACK Window::WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM 
 
 LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-  Object* main_actor = nullptr;
-  if (obj_collection_.getObjects().size() > 0)
-    main_actor = &(obj_collection_.getObjects().at(0));
-
-  Command* cmd = nullptr;
-
   switch (uMsg)
   {
   case WM_DESTROY:
@@ -302,7 +297,7 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
       // Fill background.
       FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
 
-      for(const auto& obj : obj_collection_.getObjects())
+      for(const auto& obj : obj_collection_)
       {
         const auto w = 20;
         const auto h = 20;
@@ -315,15 +310,15 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     }
   case WM_KEYDOWN:
   {
-    if (const auto it = down_commands_.find(wParam); it != down_commands_.end())
-      cmd = it->second.get();
+    for (auto& o : obj_collection_)
+      o.handleInput(KeyState::Down, wParam);
 
     break;
   }
   case WM_KEYUP:
   {
-    if (const auto it = up_commands_.find(wParam); it != up_commands_.end())
-      cmd = it->second.get();
+    for (auto& o : obj_collection_)
+      o.handleInput(KeyState::Up, wParam);
 
     break;
   }
@@ -331,26 +326,7 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     return 0;
   }
 
-  if (cmd && main_actor)
-  {
-    cmd->execute(*main_actor);
-  }
-
   return DefWindowProc(hWnd, uMsg, wParam, lParam);
-}
-
-template<typename T, typename... Args>
-void Window::registerKeyCommand(int key, KeyState state, Args... args)
-{
-  auto cmd = std::make_unique<T>(args...);
-  if (state == KeyState::Up)
-  {
-    up_commands_.emplace(key, std::move(cmd));
-  }
-  else // KeyState::Down
-  {
-    down_commands_.emplace(key, std::move(cmd));
-  }
 }
 
 class Game
@@ -369,14 +345,18 @@ private:
 
   std::chrono::duration<float, std::milli> frame_time_;
 
-  ObjectCollection object_collection_;
+  std::vector<Object> objects_;
 };
 
 void Game::init(Configuration const& config)
 {
-  win_ = std::make_unique<Window>(config, object_collection_);
+  win_ = std::make_unique<Window>(config, objects_);
   frame_time_ = std::chrono::milliseconds(1000) / config.fps;
-  object_collection_.addObject(config.window_width / 2.f, config.window_height / 2.f);
+
+  Object main_actor(config.window_width / 2.f, config.window_height / 2.f);
+  main_actor.dynamics_handler_ = std::make_unique<StraightMotion>();
+  main_actor.input_handler_ = std::make_unique<MainActorInput>();
+  objects_.emplace_back(std::move(main_actor));
 }
 
 void Game::exec()
@@ -397,13 +377,18 @@ void Game::exec()
       DispatchMessage(&msg);
     }
 
-    for (auto& o : object_collection_.getObjects())
+    for (auto& o : objects_)
     {
-      o.x += o.vx;
-      o.y += o.vy;
+      o.handleDynamics();
     }
 
     triggerRender();
+
+    {
+      auto& vec = objects_;
+      vec.erase(std::remove_if(vec.begin(), vec.end(),
+        [](Object const& o) { return o.remove; }), vec.end());
+    }
 
     const auto end_time = std::chrono::steady_clock::now();
     const auto body_duration = end_time - begin_time;
