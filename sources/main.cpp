@@ -87,8 +87,9 @@ Configuration read_config()
 }
 
 class DynamicsHandler;
-class InputHandler;
+class CollisionHandler;
 class GraphicsHandler;
+class InputHandler;
 
 enum class KeyState { Up, Down };
 
@@ -96,17 +97,19 @@ struct Object
 {
   Object(float x, float y, float vx = 0.f, float vy = 0.f) : x(x), y(y), vx(vx), vy(vy) {}
 
-  void handleInput(KeyState state, int vkey);
   void handleDynamics();
+  void handleCollision(Object& obj);
   void handleGraphics(Gdiplus::Graphics& graphics);
+  void handleInput(KeyState state, int vkey);
 
   float x = 0.f, y = 0.f;
   float vx = 0.f, vy = 0.f;
   bool remove = false;
 
   std::unique_ptr<DynamicsHandler> dynamics_handler_;
-  std::unique_ptr<InputHandler> input_handler_;
+  std::unique_ptr<CollisionHandler> collision_handler_;
   std::unique_ptr<GraphicsHandler> graphics_handler_;
+  std::unique_ptr<InputHandler> input_handler_;
 
 };
 
@@ -118,14 +121,12 @@ public:
   virtual void handleDynamics(Object& obj) = 0;
 };
 
-class StraightMotion : public DynamicsHandler
+class CollisionHandler
 {
 public:
-  virtual void handleDynamics(Object& obj)
-  {
-    obj.x += obj.vx;
-    obj.y += obj.vy;
-  }
+  virtual ~CollisionHandler() {}
+
+  virtual void handleCollision(Object& obj) = 0;
 };
 
 class GraphicsHandler
@@ -134,6 +135,48 @@ public:
   ~GraphicsHandler() {}
 
   virtual void handleGraphics(Object& obj, Gdiplus::Graphics& graphics) = 0;
+};
+
+class InputHandler
+{
+public:
+  virtual ~InputHandler() {}
+
+  virtual void handleInput(Object& obj, KeyState state, int vkey) = 0;
+};
+
+void Object::handleDynamics()
+{
+  if (dynamics_handler_)
+    dynamics_handler_->handleDynamics(*this);
+}
+
+void Object::handleCollision(Object& obj)
+{
+  if (collision_handler_)
+    collision_handler_->handleCollision(obj);
+}
+
+void Object::handleGraphics(Gdiplus::Graphics& graphics)
+{
+  if (graphics_handler_)
+    graphics_handler_->handleGraphics(*this, graphics);
+}
+
+void Object::handleInput(KeyState state, int vkey)
+{
+  if(input_handler_)
+    input_handler_->handleInput(*this, state, vkey);
+}
+
+class StraightMotion : public DynamicsHandler
+{
+public:
+  virtual void handleDynamics(Object& obj)
+  {
+    obj.x += obj.vx;
+    obj.y += obj.vy;
+  }
 };
 
 class BitmapGraphics : public GraphicsHandler
@@ -157,14 +200,6 @@ void BitmapGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
   const int top = obj.y - h / 2;
   graphics.DrawImage(&bitmap_, left, top);
 }
-
-class InputHandler
-{
-public:
-  virtual ~InputHandler() {}
-
-  virtual void handleInput(Object& obj, KeyState state, int vkey) = 0;
-};
 
 class MainActorInput : public InputHandler
 {
@@ -245,24 +280,6 @@ void MainActorInput::createBullet(Object& obj)
   bullet.graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
 
   objects_.emplace_back(std::move(bullet));
-}
-
-void Object::handleInput(KeyState state, int vkey)
-{
-  if(input_handler_)
-    input_handler_->handleInput(*this, state, vkey);
-}
-
-void Object::handleDynamics()
-{
-  if (dynamics_handler_)
-    dynamics_handler_->handleDynamics(*this);
-}
-
-void Object::handleGraphics(Gdiplus::Graphics& graphics)
-{
-  if (graphics_handler_)
-    graphics_handler_->handleGraphics(*this, graphics);
 }
 
 class SolidBrushRaii
