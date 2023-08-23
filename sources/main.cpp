@@ -65,27 +65,6 @@ Logger& file_logger()
 
 Logger& logger = file_logger();
 
-struct Configuration
-{
-  int window_width = 1000;
-  int window_height = 800;
-  HINSTANCE instance;
-  int cmd_show;
-
-  float fps = 16;
-
-  float main_actor_v = 2.f;
-  const WCHAR* main_actor_bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
-
-  float bullet_v = 5.f;
-  const WCHAR* bullet_bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
-};
-
-Configuration read_config()
-{
-  return Configuration();
-}
-
 class DynamicsHandler;
 class CollisionHandler;
 class GraphicsHandler;
@@ -93,9 +72,14 @@ class InputHandler;
 
 enum class KeyState { Up, Down };
 
+struct Size
+{
+  float width = 0.f, height = 0.f;
+};
+
 struct Object
 {
-  Object(float x, float y, float vx = 0.f, float vy = 0.f) : x(x), y(y), vx(vx), vy(vy) {}
+  Object(float x, float y, float vx, float vy, Size size) : x(x), y(y), vx(vx), vy(vy), size(size) {}
 
   void handleDynamics();
   void handleCollision(Object& obj);
@@ -104,6 +88,7 @@ struct Object
 
   float x = 0.f, y = 0.f;
   float vx = 0.f, vy = 0.f;
+  Size size;
   bool remove = false;
 
   std::unique_ptr<DynamicsHandler> dynamics_handler_;
@@ -169,6 +154,34 @@ void Object::handleInput(KeyState state, int vkey)
     input_handler_->handleInput(*this, state, vkey);
 }
 
+struct Configuration
+{
+  int window_width = 1000;
+  int window_height = 800;
+  HINSTANCE instance;
+  int cmd_show;
+
+  float fps = 16;
+
+  struct
+  {
+    float v = 2.f;
+    const WCHAR* bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
+    Size size{ 50.f, 50.f };
+  } actor;
+
+  struct
+  {
+    float v = 5.f;
+    const WCHAR* bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
+    Size size{ 50.f, 50.f };
+  } bullet;
+};
+
+Configuration read_config()
+{
+  return Configuration();
+}
 class StraightMotion : public DynamicsHandler
 {
 public:
@@ -227,7 +240,7 @@ void RectGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
 class MainActorInput : public InputHandler
 {
 public:
-  explicit MainActorInput(float v, float v_bullet, const WCHAR* bullet_bitmap, std::vector<Object>& objects);
+  explicit MainActorInput(Configuration const& config, std::vector<Object>& objects);
 
   void handleInput(Object& obj, KeyState state, int vkey) override;
 
@@ -236,12 +249,14 @@ public:
 
   float v_ = 0.f;
   float v_bullet_ = 0.f;
+  Size bullet_size_;
   const WCHAR* bullet_bitmap_;
   std::vector<Object>& objects_;
 };
 
-MainActorInput::MainActorInput(float v, float v_bullet, const WCHAR* bullet_bitmap, std::vector<Object>& objects) :
-  v_(v), v_bullet_(v_bullet), bullet_bitmap_(bullet_bitmap), objects_(objects) {}
+MainActorInput::MainActorInput(Configuration const& config, std::vector<Object>& objects) :
+  v_(config.actor.v), v_bullet_(config.bullet.v), bullet_bitmap_(config.bullet.bitmap), 
+  bullet_size_(config.bullet.size), objects_(objects) {}
 
 void MainActorInput::handleInput(Object& obj, KeyState state, int vkey)
 {
@@ -297,7 +312,7 @@ void MainActorInput::createBullet(Object& obj)
   const float unit_x = abs_vx > 1e-6f ? obj.vx / abs_vx : 0.f;
   const float abs_vy = abs(obj.vy);
   const float unit_y = abs_vy > 1e-6f ? obj.vy / abs_vy : 0.f;
-  Object bullet(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_);
+  Object bullet(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
 
   bullet.dynamics_handler_ = std::make_unique<StraightMotion>();
   bullet.graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
@@ -486,13 +501,13 @@ void Game::init(Configuration const& config)
   win_ = std::make_unique<Window>(config, objects_);
   frame_time_ = std::chrono::milliseconds(1000) / config.fps;
 
-  Object main_actor(config.window_width / 2.f, config.window_height / 2.f);
+  Object main_actor(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
   main_actor.dynamics_handler_ = std::make_unique<StraightMotion>();
-  main_actor.input_handler_ = std::make_unique<MainActorInput>(config.main_actor_v, config.bullet_v, config.bullet_bitmap, objects_);
-  main_actor.graphics_handler_ = std::make_unique<BitmapGraphics>(config.main_actor_bitmap);
+  main_actor.input_handler_ = std::make_unique<MainActorInput>(config, objects_);
+  main_actor.graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
   objects_.emplace_back(std::move(main_actor));
 
-  Object big_box(config.window_width / 1.5f, config.window_height / 1.5f);
+  Object big_box(config.window_width / 1.5f, config.window_height / 1.5f, 0.f, 0.f, { 100.f, 100.f });
   big_box.graphics_handler_ = std::make_unique<RectGraphics>(100, 100);
   objects_.emplace_back(std::move(big_box));
 }
