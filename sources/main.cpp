@@ -172,7 +172,7 @@ void Object::handleInput(KeyState state, int vkey)
 class StraightMotion : public DynamicsHandler
 {
 public:
-  virtual void handleDynamics(Object& obj)
+  virtual void handleDynamics(Object& obj) override
   {
     obj.x += obj.vx;
     obj.y += obj.vy;
@@ -184,7 +184,7 @@ class BitmapGraphics : public GraphicsHandler
 public:
   BitmapGraphics(const WCHAR* file);
 
-  void handleGraphics(Object& obj, Gdiplus::Graphics& graphics);
+  void handleGraphics(Object& obj, Gdiplus::Graphics& graphics) override;
 
 private:
   Gdiplus::Bitmap bitmap_;
@@ -200,13 +200,36 @@ void BitmapGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
   const int top = obj.y - h / 2;
   graphics.DrawImage(&bitmap_, left, top);
 }
+class RectGraphics : public GraphicsHandler
+{
+public:
+  RectGraphics(int width, int height);
+
+  void handleGraphics(Object& obj, Gdiplus::Graphics& graphics) override;
+
+private:
+  int w_ = 0, h_ = 0;
+  Gdiplus::Pen pen_;
+};
+
+RectGraphics::RectGraphics(int width, int height) : 
+  w_(width), h_(height), pen_(Gdiplus::Color(255, 0, 0, 0)) {}
+
+void RectGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
+{
+  const auto x = int(obj.x) - w_ / 2;
+  const auto y = int(obj.y) - h_ / 2;
+
+  Gdiplus::Rect rect(x, y, w_, h_);
+  graphics.DrawRectangle(&pen_, rect);
+}
 
 class MainActorInput : public InputHandler
 {
 public:
   explicit MainActorInput(float v, float v_bullet, const WCHAR* bullet_bitmap, std::vector<Object>& objects);
 
-  void handleInput(Object& obj, KeyState state, int vkey);
+  void handleInput(Object& obj, KeyState state, int vkey) override;
 
 public:
   void createBullet(Object& obj);
@@ -468,6 +491,10 @@ void Game::init(Configuration const& config)
   main_actor.input_handler_ = std::make_unique<MainActorInput>(config.main_actor_v, config.bullet_v, config.bullet_bitmap, objects_);
   main_actor.graphics_handler_ = std::make_unique<BitmapGraphics>(config.main_actor_bitmap);
   objects_.emplace_back(std::move(main_actor));
+
+  Object big_box(config.window_width / 1.5f, config.window_height / 1.5f);
+  big_box.graphics_handler_ = std::make_unique<RectGraphics>(100, 100);
+  objects_.emplace_back(std::move(big_box));
 }
 
 void Game::exec()
