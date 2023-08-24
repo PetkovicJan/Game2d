@@ -79,10 +79,11 @@ struct Size
 
 struct Object
 {
-  Object(float x, float y, float vx, float vy, Size size) : x(x), y(y), vx(vx), vy(vy), size(size) {}
+  Object(float x, float y, float vx, float vy, Size size) : 
+    x(x), y(y), vx(vx), vy(vy), size(size) {}
 
   void handleDynamics();
-  void handleCollision(Object& obj);
+  void handleCollision(Object& other);
   void handleGraphics(Gdiplus::Graphics& graphics);
   void handleInput(KeyState state, int vkey);
 
@@ -91,11 +92,10 @@ struct Object
   Size size;
   bool remove = false;
 
-  std::unique_ptr<DynamicsHandler> dynamics_handler_;
-  std::unique_ptr<CollisionHandler> collision_handler_;
-  std::unique_ptr<GraphicsHandler> graphics_handler_;
-  std::unique_ptr<InputHandler> input_handler_;
-
+  std::unique_ptr<DynamicsHandler> dynamics_handler_ = nullptr;
+  std::unique_ptr<CollisionHandler> collision_handler_ = nullptr;
+  std::unique_ptr<GraphicsHandler> graphics_handler_ = nullptr;
+  std::unique_ptr<InputHandler> input_handler_ = nullptr;
 };
 
 class DynamicsHandler
@@ -111,7 +111,10 @@ class CollisionHandler
 public:
   virtual ~CollisionHandler() {}
 
-  virtual void handleCollision(Object& obj) = 0;
+  virtual void acceptCollision(CollisionHandler& handler) = 0;
+
+  virtual void handleCollision(class PlayerCollisionHandler& handler) = 0;
+  virtual void handleCollision(class TileCollisionHandler& handler) = 0;
 };
 
 class GraphicsHandler
@@ -136,10 +139,10 @@ void Object::handleDynamics()
     dynamics_handler_->handleDynamics(*this);
 }
 
-void Object::handleCollision(Object& obj)
+void Object::handleCollision(Object& other)
 {
-  if (collision_handler_)
-    collision_handler_->handleCollision(obj);
+  if (collision_handler_ && other.collision_handler_)
+    other.collision_handler_->acceptCollision(*collision_handler_);
 }
 
 void Object::handleGraphics(Gdiplus::Graphics& graphics)
@@ -182,6 +185,7 @@ Configuration read_config()
 {
   return Configuration();
 }
+
 class StraightMotion : public DynamicsHandler
 {
 public:
@@ -191,6 +195,66 @@ public:
     obj.y += obj.vy;
   }
 };
+
+class TileCollisionHandler : public CollisionHandler
+{
+public:
+  explicit TileCollisionHandler(Object& tile) : tile(tile) {}
+
+  void acceptCollision(CollisionHandler& handler) override
+  {
+    handler.handleCollision(*this);
+  }
+
+  void handleCollision(PlayerCollisionHandler& handler) override;
+
+  void handleCollision(TileCollisionHandler& handler) override {}
+
+  Object& tile;
+};
+
+class PlayerCollisionHandler : public CollisionHandler
+{
+public:
+  explicit PlayerCollisionHandler(Object& player) : player(player) {}
+
+  void acceptCollision(CollisionHandler& handler) override
+  {
+    handler.handleCollision(*this);
+  }
+
+  void handleCollision(PlayerCollisionHandler& handler) override {}
+
+  void handleCollision(TileCollisionHandler& handler) override
+  {
+    const auto& tile = handler.tile;
+    const auto dx = player.x - tile.x;
+    const auto dy = player.y - tile.y;
+
+    const float min_x_dist = 0.5f * (player.size.width + tile.size.width);
+    const float min_y_dist = 0.5f * (player.size.height + tile.size.height);
+    const float overlap_x =  min_x_dist - abs(dx);
+    const float overlap_y = min_y_dist - abs(dy);
+
+    if (overlap_x > overlap_y)
+    {
+      // Move player in the y-direction away from the tile center.
+      player.y = tile.y + (dy > 0.f ? 1.f : -1.f) * min_y_dist;
+    }
+    else
+    {
+      // Move player in the x-direction away from the tile center.
+      player.x = tile.x + (dx > 0.f ? 1.f : -1.f) * min_x_dist;
+    }
+  }
+
+  Object& player;
+};
+
+void TileCollisionHandler::handleCollision(PlayerCollisionHandler& handler)
+{
+  handler.handleCollision(*this);
+}
 
 class BitmapGraphics : public GraphicsHandler
 {
@@ -240,7 +304,7 @@ void RectGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
 class MainActorInput : public InputHandler
 {
 public:
-  explicit MainActorInput(Configuration const& config, std::vector<Object>& objects);
+  explicit MainActorInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects);
 
   void handleInput(Object& obj, KeyState state, int vkey) override;
 
@@ -251,10 +315,10 @@ public:
   float v_bullet_ = 0.f;
   Size bullet_size_;
   const WCHAR* bullet_bitmap_;
-  std::vector<Object>& objects_;
+  std::vector<std::unique_ptr<Object>>& objects_;
 };
 
-MainActorInput::MainActorInput(Configuration const& config, std::vector<Object>& objects) :
+MainActorInput::MainActorInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects) :
   v_(config.actor.v), v_bullet_(config.bullet.v), bullet_bitmap_(config.bullet.bitmap), 
   bullet_size_(config.bullet.size), objects_(objects) {}
 
@@ -312,10 +376,10 @@ void MainActorInput::createBullet(Object& obj)
   const float unit_x = abs_vx > 1e-6f ? obj.vx / abs_vx : 0.f;
   const float abs_vy = abs(obj.vy);
   const float unit_y = abs_vy > 1e-6f ? obj.vy / abs_vy : 0.f;
-  Object bullet(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
+  auto bullet = std::make_unique<Object>(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
 
-  bullet.dynamics_handler_ = std::make_unique<StraightMotion>();
-  bullet.graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
+  bullet->dynamics_handler_ = std::make_unique<StraightMotion>();
+  bullet->graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
 
   objects_.emplace_back(std::move(bullet));
 }
@@ -348,7 +412,7 @@ SolidBrushRaii::~SolidBrushRaii()
 class Window
 {
 public:
-  Window(Configuration const& config, std::vector<Object>& obj_collection);
+  Window(Configuration const& config, std::vector<std::unique_ptr<Object>>& obj_collection);
 
   ~Window();
 
@@ -358,10 +422,10 @@ private:
   LRESULT CALLBACK WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
   HWND hWnd_ = NULL;
-  std::vector<Object>& obj_collection_;
+  std::vector<std::unique_ptr<Object>>& obj_collection_;
 };
 
-Window::Window(Configuration const& config, std::vector<Object>& obj_collection) : obj_collection_(obj_collection)
+Window::Window(Configuration const& config, std::vector<std::unique_ptr<Object>>& obj_collection) : obj_collection_(obj_collection)
 {
   BufferedPaintInit();
 
@@ -450,7 +514,7 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 
       Gdiplus::Graphics graphics(buff_hdc);
       for (auto it = obj_collection_.rbegin(); it != obj_collection_.rend(); ++it )
-        it->handleGraphics(graphics);
+        (*it)->handleGraphics(graphics);
 
       EndBufferedPaint(h_buff, TRUE);
       EndPaint(hWnd, &ps);
@@ -458,15 +522,25 @@ LRESULT CALLBACK Window::WindowProcImpl(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     }
   case WM_KEYDOWN:
   {
-    for (auto& o : obj_collection_)
-      o.handleInput(KeyState::Down, wParam);
+    std::vector<Object*> current_objects;
+    current_objects.reserve(obj_collection_.size());
+    for (auto& obj : obj_collection_)
+      current_objects.push_back(obj.get());
+
+    for (auto obj : current_objects)
+      obj->handleInput(KeyState::Down, wParam);
 
     break;
   }
   case WM_KEYUP:
   {
-    for (auto& o : obj_collection_)
-      o.handleInput(KeyState::Up, wParam);
+    std::vector<Object*> current_objects;
+    current_objects.reserve(obj_collection_.size());
+    for (auto& obj : obj_collection_)
+      current_objects.push_back(obj.get());
+
+    for (auto obj : current_objects)
+      obj->handleInput(KeyState::Up, wParam);
 
     break;
   }
@@ -489,11 +563,13 @@ public:
 private:
   void triggerRender();
 
+  bool areObjectsColliding(Object& obj_1, Object& obj_2);
+
   std::unique_ptr<Window> win_;
 
   std::chrono::duration<float, std::milli> frame_time_;
 
-  std::vector<Object> objects_;
+  std::vector<std::unique_ptr<Object>> objects_;
 };
 
 void Game::init(Configuration const& config)
@@ -501,14 +577,16 @@ void Game::init(Configuration const& config)
   win_ = std::make_unique<Window>(config, objects_);
   frame_time_ = std::chrono::milliseconds(1000) / config.fps;
 
-  Object main_actor(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
-  main_actor.dynamics_handler_ = std::make_unique<StraightMotion>();
-  main_actor.input_handler_ = std::make_unique<MainActorInput>(config, objects_);
-  main_actor.graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
+  auto main_actor = std::make_unique<Object>(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
+  main_actor->dynamics_handler_ = std::make_unique<StraightMotion>();
+  main_actor->collision_handler_ = std::make_unique<PlayerCollisionHandler>(*main_actor);
+  main_actor->input_handler_ = std::make_unique<MainActorInput>(config, objects_);
+  main_actor->graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
   objects_.emplace_back(std::move(main_actor));
 
-  Object big_box(config.window_width / 1.5f, config.window_height / 1.5f, 0.f, 0.f, { 100.f, 100.f });
-  big_box.graphics_handler_ = std::make_unique<RectGraphics>(100, 100);
+  auto big_box = std::make_unique<Object>(config.window_width / 1.5f, config.window_height / 1.5f, 0.f, 0.f, Size{ 100.f, 100.f });
+  big_box->collision_handler_ = std::make_unique<TileCollisionHandler>(*big_box);
+  big_box->graphics_handler_ = std::make_unique<RectGraphics>(100, 100);
   objects_.emplace_back(std::move(big_box));
 }
 
@@ -532,7 +610,23 @@ void Game::exec()
 
     for (auto& o : objects_)
     {
-      o.handleDynamics();
+      o->handleDynamics();
+    }
+
+    // Collision detection.
+    // Loop over unique pairs of objects.
+    for (int i = 0; i < objects_.size(); ++i)
+    {
+      auto& obj_1 = objects_.at(i);
+      for (int j = 0; j < i; ++j)
+      {
+        auto& obj_2 = objects_.at(j);
+
+        if (areObjectsColliding(*obj_1, *obj_2))
+        {
+          obj_1->handleCollision(*obj_2);
+        }
+      }
     }
 
     triggerRender();
@@ -540,7 +634,7 @@ void Game::exec()
     {
       auto& vec = objects_;
       vec.erase(std::remove_if(vec.begin(), vec.end(),
-        [](Object const& o) { return o.remove; }), vec.end());
+        [](auto const& o) { return o->remove; }), vec.end());
     }
 
     const auto end_time = std::chrono::steady_clock::now();
@@ -555,6 +649,28 @@ void Game::exec()
 void Game::triggerRender()
 {
   win_->render();
+}
+
+bool Game::areObjectsColliding(Object& obj_1, Object& obj_2)
+{
+  const float dpos_x = obj_1.x - obj_2.x;
+  const float dpos_y = obj_1.y - obj_2.y;
+
+  const bool overlap_x = abs(dpos_x) < 0.5f * (obj_1.size.width + obj_2.size.width);
+  const bool overlap_y = abs(dpos_y) < 0.5f * (obj_1.size.height + obj_2.size.height);
+  if (overlap_x && overlap_y)
+  {
+    // Due to finite time steps in game engine the collision might have already 
+    // been handled in the previous step and the objects are moving apart from 
+    // each other, even though they are still close enough. Therefore it is 
+    // crucial to also check the relative velocity with respect to the distance 
+    // between them.
+    const auto dv_x = obj_1.vx - obj_2.vx;
+    const auto dv_y = obj_1.vy - obj_2.vy;
+    return (dpos_x * dv_x + dpos_y * dv_y) < 0.f;
+  }
+
+  return false;
 }
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
