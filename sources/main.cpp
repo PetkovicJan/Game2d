@@ -186,14 +186,24 @@ Configuration read_config()
   return Configuration();
 }
 
-class StraightMotion : public DynamicsHandler
+class LinearMotion : public DynamicsHandler
 {
 public:
+  LinearMotion(float world_width, float world_height) :
+    world_width_(world_width), world_height_(world_height) {}
+
   virtual void handleDynamics(Object& obj) override
   {
     obj.x += obj.vx;
     obj.y += obj.vy;
+
+    if (obj.x < 0.f || obj.x > world_width_ || obj.y < 0.f || obj.y > world_height_)
+      obj.remove = true;
   }
+
+private:
+  float world_width_;
+  float world_height_;
 };
 
 class TileCollisionHandler : public CollisionHandler
@@ -317,12 +327,16 @@ public:
   const WCHAR* bullet_bitmap_;
   std::vector<std::unique_ptr<Object>>& objects_;
 
+  float world_width_;
+  float world_height_;
+
   int last_dir_ = VK_RIGHT;
 };
 
 PlayerInput::PlayerInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects) :
   v_(config.actor.v), v_bullet_(config.bullet.v), bullet_bitmap_(config.bullet.bitmap), 
-  bullet_size_(config.bullet.size), objects_(objects) {}
+  bullet_size_(config.bullet.size), objects_(objects), 
+  world_width_(config.window_width), world_height_(config.window_height) {}
 
 void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
 {
@@ -386,7 +400,7 @@ void PlayerInput::createBullet(Object& obj)
 
   auto bullet = std::make_unique<Object>(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
 
-  bullet->dynamics_handler_ = std::make_unique<StraightMotion>();
+  bullet->dynamics_handler_ = std::make_unique<LinearMotion>(world_width_, world_height_);
   bullet->graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
 
   objects_.emplace_back(std::move(bullet));
@@ -586,7 +600,7 @@ void Game::init(Configuration const& config)
   frame_time_ = std::chrono::milliseconds(1000) / config.fps;
 
   auto player = std::make_unique<Object>(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
-  player->dynamics_handler_ = std::make_unique<StraightMotion>();
+  player->dynamics_handler_ = std::make_unique<LinearMotion>(config.window_width, config.window_height);
   player->collision_handler_ = std::make_unique<PlayerCollisionHandler>(*player);
   player->input_handler_ = std::make_unique<PlayerInput>(config, objects_);
   player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
