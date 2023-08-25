@@ -157,6 +157,21 @@ void Object::handleInput(KeyState state, int vkey)
     input_handler_->handleInput(*this, state, vkey);
 }
 
+struct Point
+{
+  int x = 0, y = 0;
+};
+
+struct TileConfiguration
+{
+  int grid_width;
+  int grid_height;
+
+  float tile_size;
+  const WCHAR* tile_bitmap;
+  std::vector<Point> tiles;
+};
+
 struct Configuration
 {
   int window_width = 1000;
@@ -179,11 +194,39 @@ struct Configuration
     const WCHAR* bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
     Size size{ 50.f, 50.f };
   } bullet;
+
+  TileConfiguration tile_config;
 };
 
 Configuration read_config()
 {
-  return Configuration();
+  Configuration config;
+
+  config.window_width = 1000;
+  config.window_height = 800;
+
+  config.fps = 16;
+
+  config.actor.v = 3.f;
+  config.actor.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
+  config.actor.size = Size{ 50.f, 50.f };
+
+  config.bullet.v = 7.f;
+  config.bullet.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
+  config.bullet.size = Size{ 50.f, 50.f };
+
+  float tile_sz = 20.f;
+  config.tile_config.tile_size = tile_sz;
+  config.tile_config.grid_width = config.window_width / tile_sz;
+  config.tile_config.grid_height = config.window_height / tile_sz;
+
+  // Fill bottom row of the window with tiles.
+  const auto grid_y = config.tile_config.grid_height - 5;
+  auto& tiles = config.tile_config.tiles;
+  for (int i = 3; i < config.tile_config.grid_width - 4; ++i)
+    tiles.push_back(Point{ i, grid_y });
+
+  return config;
 }
 
 class LinearMotion : public DynamicsHandler
@@ -406,29 +449,22 @@ void PlayerInput::createBullet(Object& obj)
   objects_.emplace_back(std::move(bullet));
 }
 
-class SolidBrushRaii
+void addTiles(TileConfiguration const& config, std::vector<std::unique_ptr<Object>>& objects)
 {
-public:
-  SolidBrushRaii(HDC dc, int r, int g, int b);
+  const auto tile_size = config.tile_size;
+  const auto offset = 0.5f * config.tile_size;
+  for (auto pt : config.tiles)
+  {
+    // Create a tile object.
+    const auto x = pt.x * tile_size + offset;
+    const auto y = pt.y * tile_size + offset;
+    auto tile = std::make_unique<Object>(x, y, 0.f, 0.f, Size{ tile_size, tile_size });
+    tile->collision_handler_ = std::make_unique<TileCollisionHandler>(*tile);
+    tile->graphics_handler_ = std::make_unique<RectGraphics>(tile_size, tile_size);
 
-  ~SolidBrushRaii();
-
-private:
-  HDC dc_ = NULL;
-  HBRUSH new_brush_ = NULL;
-  HBRUSH old_brush_ = NULL;
-};
-
-SolidBrushRaii::SolidBrushRaii(HDC dc, int r, int g, int b) : dc_(dc)
-{
-  new_brush_ = CreateSolidBrush(RGB(r, g, b));
-  old_brush_ = (HBRUSH)SelectObject(dc, new_brush_);
-}
-
-SolidBrushRaii::~SolidBrushRaii()
-{
-  SelectObject(dc_, old_brush_);
-  DeleteObject(new_brush_);
+    // Add a tile to object collection.
+    objects.emplace_back(std::move(tile));
+  }
 }
 
 class Window
@@ -606,10 +642,8 @@ void Game::init(Configuration const& config)
   player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
   objects_.emplace_back(std::move(player));
 
-  auto big_box = std::make_unique<Object>(config.window_width / 1.5f, config.window_height / 1.5f, 0.f, 0.f, Size{ 100.f, 100.f });
-  big_box->collision_handler_ = std::make_unique<TileCollisionHandler>(*big_box);
-  big_box->graphics_handler_ = std::make_unique<RectGraphics>(100, 100);
-  objects_.emplace_back(std::move(big_box));
+  // Add tiles.
+  addTiles(config.tile_config, objects_);
 }
 
 void Game::exec()
