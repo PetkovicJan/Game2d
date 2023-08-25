@@ -301,10 +301,10 @@ void RectGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
   graphics.DrawRectangle(&pen_, rect);
 }
 
-class MainActorInput : public InputHandler
+class PlayerInput : public InputHandler
 {
 public:
-  explicit MainActorInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects);
+  explicit PlayerInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects);
 
   void handleInput(Object& obj, KeyState state, int vkey) override;
 
@@ -318,11 +318,11 @@ public:
   std::vector<std::unique_ptr<Object>>& objects_;
 };
 
-MainActorInput::MainActorInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects) :
+PlayerInput::PlayerInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects) :
   v_(config.actor.v), v_bullet_(config.bullet.v), bullet_bitmap_(config.bullet.bitmap), 
   bullet_size_(config.bullet.size), objects_(objects) {}
 
-void MainActorInput::handleInput(Object& obj, KeyState state, int vkey)
+void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
 {
   // Handle movement.
   if (state == KeyState::Down)
@@ -370,7 +370,7 @@ void MainActorInput::handleInput(Object& obj, KeyState state, int vkey)
   }
 }
 
-void MainActorInput::createBullet(Object& obj)
+void PlayerInput::createBullet(Object& obj)
 {
   const float abs_vx = abs(obj.vx);
   const float unit_x = abs_vx > 1e-6f ? obj.vx / abs_vx : 0.f;
@@ -577,12 +577,12 @@ void Game::init(Configuration const& config)
   win_ = std::make_unique<Window>(config, objects_);
   frame_time_ = std::chrono::milliseconds(1000) / config.fps;
 
-  auto main_actor = std::make_unique<Object>(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
-  main_actor->dynamics_handler_ = std::make_unique<StraightMotion>();
-  main_actor->collision_handler_ = std::make_unique<PlayerCollisionHandler>(*main_actor);
-  main_actor->input_handler_ = std::make_unique<MainActorInput>(config, objects_);
-  main_actor->graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
-  objects_.emplace_back(std::move(main_actor));
+  auto player = std::make_unique<Object>(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
+  player->dynamics_handler_ = std::make_unique<StraightMotion>();
+  player->collision_handler_ = std::make_unique<PlayerCollisionHandler>(*player);
+  player->input_handler_ = std::make_unique<PlayerInput>(config, objects_);
+  player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
+  objects_.emplace_back(std::move(player));
 
   auto big_box = std::make_unique<Object>(config.window_width / 1.5f, config.window_height / 1.5f, 0.f, 0.f, Size{ 100.f, 100.f });
   big_box->collision_handler_ = std::make_unique<TileCollisionHandler>(*big_box);
