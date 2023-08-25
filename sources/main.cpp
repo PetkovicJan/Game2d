@@ -210,7 +210,7 @@ Configuration read_config()
 
   config.game.fps = 16;
 
-  config.player.v = 8.f;
+  config.player.v = 4.f;
   config.player.g = 0.1f;
   config.player.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
   config.player.size = Size{ 50.f, 50.f };
@@ -409,12 +409,10 @@ void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
     }
     else if (vkey == VK_UP)
     {
-      last_dir_ = vkey;
       obj.vy = -v_;
     }
     else if (vkey == VK_DOWN)
     {
-      last_dir_ = vkey;
       obj.vy = v_;
     }
   }
@@ -446,13 +444,10 @@ void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
 
 void PlayerInput::createBullet(Object& obj)
 {
-  float unit_x = 0.f, unit_y = 0.f;
-  if (last_dir_ == VK_LEFT) unit_x = -1.f;
-  else if (last_dir_ == VK_RIGHT) unit_x = 1.f;
-  else if (last_dir_ == VK_UP) unit_y = -1.f;
-  else if (last_dir_ == VK_DOWN) unit_y = 1.f;
+  // We only consider left and right direction.
+  const auto dir = last_dir_ == VK_LEFT ? -1.f : 1.f;
 
-  auto bullet = std::make_unique<Object>(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
+  auto bullet = std::make_unique<Object>(obj.x, obj.y, dir * v_bullet_, 0.f, bullet_size_);
 
   bullet->dynamics_handler_ = std::make_unique<LinearMotion>();
   bullet->graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
@@ -690,7 +685,6 @@ void Game::exec()
       if (o->x < 0.f || o->x > world_width_ || o->y < 0.f || o->y > world_height_)
         o->remove = true;
     }
-
 
     // Collision detection.
     // Loop over unique pairs of objects.
