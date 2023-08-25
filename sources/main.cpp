@@ -174,25 +174,28 @@ struct TileConfiguration
 
 struct Configuration
 {
-  int window_width = 1000;
-  int window_height = 800;
-  HINSTANCE instance;
-  int cmd_show;
-
-  float fps = 16;
+  struct
+  {
+    int window_width;
+    int window_height;
+    HINSTANCE instance;
+    int cmd_show;
+    float fps;
+  } game;
 
   struct
   {
-    float v = 2.f;
-    const WCHAR* bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
-    Size size{ 50.f, 50.f };
-  } actor;
+    float v;
+    float g;
+    const WCHAR* bitmap;
+    Size size;
+  } player;
 
   struct
   {
-    float v = 5.f;
-    const WCHAR* bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
-    Size size{ 50.f, 50.f };
+    float v;
+    const WCHAR* bitmap;
+    Size size;
   } bullet;
 
   TileConfiguration tile_config;
@@ -202,14 +205,15 @@ Configuration read_config()
 {
   Configuration config;
 
-  config.window_width = 1000;
-  config.window_height = 800;
+  config.game.window_width = 1000;
+  config.game.window_height = 800;
 
-  config.fps = 16;
+  config.game.fps = 16;
 
-  config.actor.v = 3.f;
-  config.actor.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
-  config.actor.size = Size{ 50.f, 50.f };
+  config.player.v = 8.f;
+  config.player.g = 0.1f;
+  config.player.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
+  config.player.size = Size{ 50.f, 50.f };
 
   config.bullet.v = 7.f;
   config.bullet.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
@@ -217,8 +221,8 @@ Configuration read_config()
 
   float tile_sz = 20.f;
   config.tile_config.tile_size = tile_sz;
-  config.tile_config.grid_width = config.window_width / tile_sz;
-  config.tile_config.grid_height = config.window_height / tile_sz;
+  config.tile_config.grid_width = config.game.window_width / tile_sz;
+  config.tile_config.grid_height = config.game.window_height / tile_sz;
 
   // Fill bottom row of the window with tiles.
   const auto grid_y = config.tile_config.grid_height - 5;
@@ -232,21 +236,30 @@ Configuration read_config()
 class LinearMotion : public DynamicsHandler
 {
 public:
-  LinearMotion(float world_width, float world_height) :
-    world_width_(world_width), world_height_(world_height) {}
+  LinearMotion() = default;
 
-  virtual void handleDynamics(Object& obj) override
+  void handleDynamics(Object& obj) override
+  {
+    obj.x += obj.vx;
+    obj.y += obj.vy;
+  }
+};
+
+class GravitationalMotion : public DynamicsHandler
+{
+public:
+  explicit GravitationalMotion(float gravity) : gravity_(gravity) {}
+
+  void handleDynamics(Object& obj) override
   {
     obj.x += obj.vx;
     obj.y += obj.vy;
 
-    if (obj.x < 0.f || obj.x > world_width_ || obj.y < 0.f || obj.y > world_height_)
-      obj.remove = true;
+    obj.vy += gravity_;
   }
 
 private:
-  float world_width_;
-  float world_height_;
+  float gravity_ = 0.f;
 };
 
 class TileCollisionHandler : public CollisionHandler
@@ -293,11 +306,13 @@ public:
     {
       // Move player in the y-direction away from the tile center.
       player.y = tile.y + (dy > 0.f ? 1.f : -1.f) * min_y_dist;
+      player.vy = 0.f;
     }
     else
     {
       // Move player in the x-direction away from the tile center.
       player.x = tile.x + (dx > 0.f ? 1.f : -1.f) * min_x_dist;
+      player.vx = 0.f;
     }
   }
 
@@ -370,16 +385,12 @@ public:
   const WCHAR* bullet_bitmap_;
   std::vector<std::unique_ptr<Object>>& objects_;
 
-  float world_width_;
-  float world_height_;
-
   int last_dir_ = VK_RIGHT;
 };
 
 PlayerInput::PlayerInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects) :
-  v_(config.actor.v), v_bullet_(config.bullet.v), bullet_bitmap_(config.bullet.bitmap), 
-  bullet_size_(config.bullet.size), objects_(objects), 
-  world_width_(config.window_width), world_height_(config.window_height) {}
+  v_(config.player.v), v_bullet_(config.bullet.v), bullet_bitmap_(config.bullet.bitmap),
+  bullet_size_(config.bullet.size), objects_(objects) {}
 
 void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
 {
@@ -443,7 +454,7 @@ void PlayerInput::createBullet(Object& obj)
 
   auto bullet = std::make_unique<Object>(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
 
-  bullet->dynamics_handler_ = std::make_unique<LinearMotion>(world_width_, world_height_);
+  bullet->dynamics_handler_ = std::make_unique<LinearMotion>();
   bullet->graphics_handler_ = std::make_unique<BitmapGraphics>(bullet_bitmap_);
 
   objects_.emplace_back(std::move(bullet));
@@ -490,14 +501,14 @@ Window::Window(Configuration const& config, std::vector<std::unique_ptr<Object>>
   const wchar_t CLASS_NAME[] = L"Game Window Class";
   WNDCLASS window_class = {};
   window_class.lpfnWndProc = WindowProc;
-  window_class.hInstance = config.instance;
+  window_class.hInstance = config.game.instance;
   window_class.lpszClassName = CLASS_NAME;
 
   RegisterClass(&window_class);
 
   HWND hWindow = CreateWindowEx(0, CLASS_NAME, L"Game", WS_OVERLAPPEDWINDOW, 
-    CW_USEDEFAULT, CW_USEDEFAULT, config.window_width, config.window_height,
-    NULL, NULL, config.instance, NULL);
+    CW_USEDEFAULT, CW_USEDEFAULT, config.game.window_width, config.game.window_height,
+    NULL, NULL, config.game.instance, NULL);
 
   if (hWindow == NULL)
   {
@@ -508,7 +519,7 @@ Window::Window(Configuration const& config, std::vector<std::unique_ptr<Object>>
   // Used to enable wrapping the member function into a static method.
   SetWindowLongPtr(hWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
-  ShowWindow(hWindow, config.cmd_show);
+  ShowWindow(hWindow, config.game.cmd_show);
 
   hWnd_ = hWindow;
 }
@@ -628,18 +639,26 @@ private:
   std::chrono::duration<float, std::milli> frame_time_;
 
   std::vector<std::unique_ptr<Object>> objects_;
+
+  float world_width_ = 0.f;
+  float world_height_ = 0.f;
 };
 
 void Game::init(Configuration const& config)
 {
-  win_ = std::make_unique<Window>(config, objects_);
-  frame_time_ = std::chrono::milliseconds(1000) / config.fps;
+  world_width_ = config.game.window_width;
+  world_height_ = config.game.window_height;
 
-  auto player = std::make_unique<Object>(config.window_width / 2.f, config.window_height / 2.f, 0.f, 0.f, config.actor.size);
-  player->dynamics_handler_ = std::make_unique<LinearMotion>(config.window_width, config.window_height);
+  win_ = std::make_unique<Window>(config, objects_);
+  frame_time_ = std::chrono::milliseconds(1000) / config.game.fps;
+
+  auto player = std::make_unique<Object>(
+    config.game.window_width / 2.f, config.game.window_height / 2.f, 0.f, 0.f, config.player.size);
+  //player->dynamics_handler_ = std::make_unique<LinearMotion>();
+  player->dynamics_handler_ = std::make_unique<GravitationalMotion>(config.player.g);
   player->collision_handler_ = std::make_unique<PlayerCollisionHandler>(*player);
   player->input_handler_ = std::make_unique<PlayerInput>(config, objects_);
-  player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.actor.bitmap);
+  player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.player.bitmap);
   objects_.emplace_back(std::move(player));
 
   // Add tiles.
@@ -667,7 +686,11 @@ void Game::exec()
     for (auto& o : objects_)
     {
       o->handleDynamics();
+    
+      if (o->x < 0.f || o->x > world_width_ || o->y < 0.f || o->y > world_height_)
+        o->remove = true;
     }
+
 
     // Collision detection.
     // Loop over unique pairs of objects.
@@ -741,8 +764,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     auto config = read_config();
 
     // Additional Windows specific parameters.
-    config.instance = hInstance;
-    config.cmd_show = nCmdShow;
+    config.game.instance = hInstance;
+    config.game.cmd_show = nCmdShow;
 
     auto game = std::make_unique<Game>();
 
