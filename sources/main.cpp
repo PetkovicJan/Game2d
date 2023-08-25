@@ -316,6 +316,8 @@ public:
   Size bullet_size_;
   const WCHAR* bullet_bitmap_;
   std::vector<std::unique_ptr<Object>>& objects_;
+
+  int last_dir_ = VK_RIGHT;
 };
 
 PlayerInput::PlayerInput(Configuration const& config, std::vector<std::unique_ptr<Object>>& objects) :
@@ -329,18 +331,22 @@ void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
   {
     if (vkey == VK_LEFT)
     {
+      last_dir_ = vkey;
       obj.vx = -v_;
     }
     else if (vkey == VK_RIGHT)
     {
+      last_dir_ = vkey;
       obj.vx = v_;
     }
     else if (vkey == VK_UP)
     {
+      last_dir_ = vkey;
       obj.vy = -v_;
     }
     else if (vkey == VK_DOWN)
     {
+      last_dir_ = vkey;
       obj.vy = v_;
     }
   }
@@ -372,10 +378,12 @@ void PlayerInput::handleInput(Object& obj, KeyState state, int vkey)
 
 void PlayerInput::createBullet(Object& obj)
 {
-  const float abs_vx = abs(obj.vx);
-  const float unit_x = abs_vx > 1e-6f ? obj.vx / abs_vx : 0.f;
-  const float abs_vy = abs(obj.vy);
-  const float unit_y = abs_vy > 1e-6f ? obj.vy / abs_vy : 0.f;
+  float unit_x = 0.f, unit_y = 0.f;
+  if (last_dir_ == VK_LEFT) unit_x = -1.f;
+  else if (last_dir_ == VK_RIGHT) unit_x = 1.f;
+  else if (last_dir_ == VK_UP) unit_y = -1.f;
+  else if (last_dir_ == VK_DOWN) unit_y = 1.f;
+
   auto bullet = std::make_unique<Object>(obj.x, obj.y, unit_x * v_bullet_, unit_y * v_bullet_, bullet_size_);
 
   bullet->dynamics_handler_ = std::make_unique<StraightMotion>();
