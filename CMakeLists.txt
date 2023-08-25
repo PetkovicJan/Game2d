@@ -10,4 +10,5 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/sources)
+add_subdirectory(${PROJECT_SOURCE_DIR}/sources/game_engine)
+add_subdirectory(${PROJECT_SOURCE_DIR}/sources/tools)

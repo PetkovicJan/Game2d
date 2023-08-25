@@ -1,5 +1,5 @@
 # Set the project name.
-project(Game)
+project(GameEngine)
 
 # Set source files.
 set(CPP_FILES main.cpp)
