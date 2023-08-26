@@ -4,9 +4,11 @@
 #include <QGraphicsView>
 #include <QMouseEvent>
 
+enum class TileType { Clear = 0, Ground, Wall, Water };
+
 struct Tile
 {
-  bool labeled = false;
+  TileType type = TileType::Clear;
 };
 
 class TilingWidget : public QWidget
@@ -19,6 +21,7 @@ public:
   void setConfiguration(int window_width, int window_height, int tile_size);
 
 private:
+  TileType active_type_ = TileType::Clear;
   std::vector<Tile> tiles_;
 };
 
@@ -29,6 +32,8 @@ class TilesView : public QGraphicsView
 public:
   explicit TilesView(int grid_width, int grid_height, int tile_size);
 
+  void setActiveTileType(TileType type);
+
 signals:
   void tileLabeledAt(QPoint pos);
 
@@ -37,4 +42,6 @@ private:
 
   void mousePressEvent(QMouseEvent* event) override;
   void mouseMoveEvent(QMouseEvent* event) override;
+
+  QBrush active_brush_;
 };
