@@ -172,67 +172,6 @@ struct TileConfiguration
   std::vector<Point> tiles;
 };
 
-struct Configuration
-{
-  struct
-  {
-    int window_width;
-    int window_height;
-    HINSTANCE instance;
-    int cmd_show;
-    float fps;
-  } game;
-
-  struct
-  {
-    float v;
-    float g;
-    const WCHAR* bitmap;
-    Size size;
-  } player;
-
-  struct
-  {
-    float v;
-    const WCHAR* bitmap;
-    Size size;
-  } bullet;
-
-  TileConfiguration tile_config;
-};
-
-Configuration read_config()
-{
-  Configuration config;
-
-  config.game.window_width = 1000;
-  config.game.window_height = 800;
-
-  config.game.fps = 16;
-
-  config.player.v = 4.f;
-  config.player.g = 0.1f;
-  config.player.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
-  config.player.size = Size{ 50.f, 50.f };
-
-  config.bullet.v = 7.f;
-  config.bullet.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
-  config.bullet.size = Size{ 50.f, 50.f };
-
-  float tile_sz = 20.f;
-  config.tile_config.tile_size = tile_sz;
-  config.tile_config.grid_width = config.game.window_width / tile_sz;
-  config.tile_config.grid_height = config.game.window_height / tile_sz;
-
-  // Fill bottom row of the window with tiles.
-  const auto grid_y = config.tile_config.grid_height - 5;
-  auto& tiles = config.tile_config.tiles;
-  for (int i = 3; i < config.tile_config.grid_width - 4; ++i)
-    tiles.push_back(Point{ i, grid_y });
-
-  return config;
-}
-
 class LinearMotion : public DynamicsHandler
 {
 public:
@@ -324,27 +263,6 @@ void TileCollisionHandler::handleCollision(PlayerCollisionHandler& handler)
   handler.handleCollision(*this);
 }
 
-class BitmapGraphics : public GraphicsHandler
-{
-public:
-  BitmapGraphics(const WCHAR* file);
-
-  void handleGraphics(Object& obj, Gdiplus::Graphics& graphics) override;
-
-private:
-  Gdiplus::Bitmap bitmap_;
-};
-
-BitmapGraphics::BitmapGraphics(const WCHAR* file) : bitmap_(file) {}
-
-void BitmapGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
-{
-  const int w = bitmap_.GetWidth();
-  const int h = bitmap_.GetHeight();
-  const int left = obj.x - w / 2;
-  const int top = obj.y - h / 2;
-  graphics.DrawImage(&bitmap_, left, top);
-}
 class RectGraphics : public GraphicsHandler
 {
 public:
@@ -367,6 +285,232 @@ void RectGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
 
   Gdiplus::Rect rect(x, y, w_, h_);
   graphics.DrawRectangle(&pen_, rect);
+}
+
+class BitmapGraphics : public GraphicsHandler
+{
+public:
+  BitmapGraphics(const WCHAR* file);
+
+  void handleGraphics(Object& obj, Gdiplus::Graphics& graphics) override;
+
+private:
+  Gdiplus::Bitmap bitmap_;
+};
+
+BitmapGraphics::BitmapGraphics(const WCHAR* file) : bitmap_(file) {}
+
+void BitmapGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
+{
+  const int w = bitmap_.GetWidth();
+  const int h = bitmap_.GetHeight();
+  const int left = obj.x - w / 2;
+  const int top = obj.y - h / 2;
+  graphics.DrawImage(&bitmap_, left, top);
+}
+
+struct AnimationConfiguration
+{
+  struct SingleAnimationConfiguration
+  {
+    std::string name;
+    float fps = 1.f;
+    std::vector<const WCHAR*> frame_files;
+  };
+
+  std::vector<SingleAnimationConfiguration> single_animation_configs;
+};
+
+class AnimationGraphics : public GraphicsHandler
+{
+public:
+  AnimationGraphics(AnimationConfiguration const& config);
+
+  void handleGraphics(Object& obj, Gdiplus::Graphics& graphics) override;
+
+  void play();
+  void stop();
+
+  void setAnimation(std::string const& animation);
+
+  void flipHorizontally(bool flip);
+  void flipVertically(bool flip);
+
+private:
+  struct SingleAnimationData
+  {
+    std::vector<std::unique_ptr<Gdiplus::Bitmap>> frames;
+    float frame_time_ms;
+    int current_frame_idx_ = 0;
+  };
+
+  class FrameTimeout
+  {
+  public:
+    explicit FrameTimeout(float ms) : timeout_ms_(ms) 
+    {
+      start_ = std::chrono::high_resolution_clock::now();
+    }
+
+    bool is_out() const
+    {
+      const auto current = std::chrono::high_resolution_clock::now();
+      const auto diff = std::chrono::duration<float>(current - start_);
+
+      return std::chrono::duration_cast<std::chrono::milliseconds>(diff).count() > timeout_ms_;
+    }
+
+    void reset()
+    {
+      start_ = std::chrono::high_resolution_clock::now();
+    }
+
+  private:
+    float timeout_ms_;
+    std::chrono::high_resolution_clock::time_point start_;
+  };
+
+  std::unordered_map<std::string, SingleAnimationData> animation_data_;
+  SingleAnimationData* current_animation_data_ = nullptr;
+
+  std::unique_ptr<FrameTimeout> frame_timeout_;
+};
+
+AnimationGraphics::AnimationGraphics(AnimationConfiguration const& config)
+{
+  for (const auto& single_animation_config : config.single_animation_configs)
+  {
+    SingleAnimationData single_data;
+    single_data.current_frame_idx_ = 0;
+    single_data.frame_time_ms = 1000.f / single_animation_config.fps;
+
+    for (const auto& file : single_animation_config.frame_files)
+    {
+      single_data.frames.emplace_back(std::make_unique<Gdiplus::Bitmap>(file));
+    }
+
+    const auto animation_name = single_animation_config.name;
+    animation_data_.emplace(animation_name, std::move(single_data));
+  }
+
+  const auto& first_name = config.single_animation_configs.front().name;
+  current_animation_data_ = &(animation_data_.at(first_name));
+  frame_timeout_ = std::make_unique<FrameTimeout>(current_animation_data_->frame_time_ms);
+}
+
+void AnimationGraphics::handleGraphics(Object& obj, Gdiplus::Graphics& graphics)
+{
+  if (!current_animation_data_) return;
+
+  if (frame_timeout_->is_out())
+  {
+    auto& data = current_animation_data_;
+    data->current_frame_idx_ = (data->current_frame_idx_ + 1) % data->frames.size();
+
+    frame_timeout_->reset();
+  }
+
+  const auto& frame = current_animation_data_->frames.at(current_animation_data_->current_frame_idx_);
+
+  const int w = frame->GetWidth();
+  const int h = frame->GetHeight();
+  const int left = obj.x - w / 2;
+  const int top = obj.y - h / 2;
+  graphics.DrawImage(frame.get(), left, top);
+}
+
+void AnimationGraphics::play()
+{
+}
+
+void AnimationGraphics::stop()
+{
+}
+
+void AnimationGraphics::setAnimation(std::string const& animation)
+{
+  auto it = animation_data_.find(animation);
+  if (it == animation_data_.end()) return;
+
+  current_animation_data_ = &(it->second);
+  frame_timeout_ = std::make_unique<FrameTimeout>(current_animation_data_->frame_time_ms);
+}
+
+void AnimationGraphics::flipHorizontally(bool flip)
+{
+}
+
+void AnimationGraphics::flipVertically(bool flip)
+{
+}
+
+struct Configuration
+{
+  struct
+  {
+    int window_width;
+    int window_height;
+    HINSTANCE instance;
+    int cmd_show;
+    float fps;
+  } game;
+
+  struct
+  {
+    float v;
+    float g;
+    const WCHAR* bitmap;
+    Size size;
+    AnimationConfiguration anim_config;
+  } player;
+
+  struct
+  {
+    float v;
+    const WCHAR* bitmap;
+    Size size;
+  } bullet;
+
+  TileConfiguration tile_config;
+};
+
+Configuration read_config()
+{
+  Configuration config;
+
+  config.game.window_width = 1000;
+  config.game.window_height = 800;
+
+  config.game.fps = 16;
+
+  config.player.v = .5f;
+  config.player.g = 0.1f;
+  config.player.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\shooter.jpg";
+  config.player.size = Size{ 50.f, 50.f };
+  auto& anim = config.player.anim_config;
+  AnimationConfiguration::SingleAnimationConfiguration walk_anim;
+  walk_anim.fps = 3.f;
+  walk_anim.name = "walk";
+  walk_anim.frame_files.push_back(L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\walking_1.png");
+  walk_anim.frame_files.push_back(L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\walking_2.png");
+  anim.single_animation_configs.push_back(walk_anim);
+
+  config.bullet.v = 3.f;
+  config.bullet.bitmap = L"C:\\Jan\\Programiranje\\\C++\\Game2d\\resources\\bullet.png";
+  config.bullet.size = Size{ 50.f, 50.f };
+
+  float tile_sz = 20.f;
+  config.tile_config.tile_size = tile_sz;
+  config.tile_config.grid_width = config.game.window_width / tile_sz;
+  config.tile_config.grid_height = config.game.window_height / tile_sz;
+
+  // Fill bottom row of the window with tiles.
+  const auto grid_y = config.tile_config.grid_height - 5;
+  auto& tiles = config.tile_config.tiles;
+  for (int i = 3; i < config.tile_config.grid_width - 4; ++i)
+    tiles.push_back(Point{ i, grid_y });
+
+  return config;
 }
 
 class PlayerInput : public InputHandler
@@ -653,7 +797,8 @@ void Game::init(Configuration const& config)
   player->dynamics_handler_ = std::make_unique<GravitationalMotion>(config.player.g);
   player->collision_handler_ = std::make_unique<PlayerCollisionHandler>(*player);
   player->input_handler_ = std::make_unique<PlayerInput>(config, objects_);
-  player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.player.bitmap);
+  //player->graphics_handler_ = std::make_unique<BitmapGraphics>(config.player.bitmap);
+  player->graphics_handler_ = std::make_unique<AnimationGraphics>(config.player.anim_config);
   objects_.emplace_back(std::move(player));
 
   // Add tiles.
@@ -776,3 +921,4 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
   return 0;
 }
+
